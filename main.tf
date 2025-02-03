@@ -14,15 +14,12 @@ provider "aws" {
 data "aws_availability_zones" "available" {}
 
 locals {
-  region = "us-east-1"
-  name   = "Dev"
-
-  vpc_cidr = "10.0.0.0/16"
-  azs      = slice(data.aws_availability_zones.available.names, 0, 3)
-
+  region         = "us-east-1"
+  name           = "Dev"
+  vpc_cidr       = "10.0.0.0/16"
+  azs            = slice(data.aws_availability_zones.available.names, 0, 3)
   container_name = "application-container"
   container_port = 80
-
   tags = {
     Name = local.name
   }
@@ -65,8 +62,9 @@ module "ecs_service" {
   name         = "${local.name}-service"
   cluster_arn  = module.ecs_cluster.arn
   network_mode = "bridge"
-  cpu    = 512
-  memory = 512
+  cpu          = 512
+  memory       = 512
+  force_delete = true
   # Task Definition
   requires_compatibilities = ["EC2"]
   capacity_provider_strategy = {
@@ -259,10 +257,10 @@ module "autoscaling_sg" {
   #   }
   # ]
   # number_of_computed_ingress_with_source_security_group_id = 1
-  ingress_rules = ["http-80-tcp"]
-  ingress_cidr_blocks = ["0.0.0.0/0"] 
-  egress_rules  = ["all-all"]
-  tags          = local.tags
+  ingress_rules       = ["http-80-tcp"]
+  ingress_cidr_blocks = ["0.0.0.0/0"]
+  egress_rules        = ["all-all"]
+  tags                = local.tags
 }
 
 module "vpc" {

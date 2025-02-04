@@ -36,7 +36,7 @@ module "ecs_cluster" {
     # On-demand instances
     ec_2 = {
       auto_scaling_group_arn         = module.autoscaling["ec_2"].autoscaling_group_arn
-      managed_termination_protection = "ENABLED"
+      managed_termination_protection = "DISABLED"
 
       managed_scaling = {
         maximum_scaling_step_size = 1
@@ -237,8 +237,8 @@ module "autoscaling" {
   autoscaling_group_tags = {
     AmazonECSManaged = true
   }
-  # Required for  managed_termination_protection = "ENABLED"
-  protect_from_scale_in = true
+  # Required for  managed_termination_protection = "DISABLED"
+  protect_from_scale_in = false
   enable_monitoring     = false
   tags                  = local.tags
 

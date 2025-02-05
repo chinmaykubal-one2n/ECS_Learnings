@@ -23,6 +23,19 @@ locals {
   tags = {
     Name = local.name
   }
+  # copy the secrets manager ARN very carefully, take the reference from the below
+  secrets_arn = "arn:aws:secretsmanager:us-east-1:846583868645:secret:demo-secrets-manager20250205120059899300000001"
+  # List of all secret names
+  secret_keys = [
+    "AZURE_STORAGE_ACCOUNT_ACCESS_KEY_Godspeed", "AZURE_STORAGE_ACCOUNT_ACCESS_KEY_Mindmatrix", "AZURE_STORAGE_ACCOUNT_ACCESS_KEY_Rooman",
+    "AZURE_STORAGE_ACCOUNT_NAME_Godspeed", "AZURE_STORAGE_ACCOUNT_NAME_Mindmatrix", "AZURE_STORAGE_ACCOUNT_NAME_Rooman",
+    "AZURE_STORAGE_CONNECTION_STRING_Godspeed", "AZURE_STORAGE_CONNECTION_STRING_Mindmatrix", "AZURE_STORAGE_CONNECTION_STRING_Rooman",
+    "BREVO_API_KEY", "DB_DATABASE", "DB_HOST", "DB_PASSWORD", "DB_PORT", "DB_USER", "JWT_SECRET_KEY", "NODE_ENV", "PORT",
+    "SUPABASE_ANON_KEY", "SUPABASE_PASSWORD", "SUPABASE_TOKEN", "SUPABASE_URL", "STUDENT_ID_ENCRYPTION_KEY",
+    "VIDEO_SUMMARY_API_URL", "INTERLEAP_API_KEY", "AZURE_STORAGE_CONNECTION_STRING_Interleap", "AZURE_STORAGE_ACCOUNT_NAME_Interleap",
+    "AZURE_STORAGE_ACCOUNT_ACCESS_KEY_Interleap", "GITHUB_CLIENT_ID1", "GITHUB_CLIENT_SECRET1", "AI_API_URL", "AI_API_KEY", "BE_API"
+  ]
+
 }
 
 module "ecs_cluster" {
@@ -64,7 +77,7 @@ module "ecs_service" {
   network_mode = "bridge"
   cpu          = 512
   memory       = 512
-  force_delete = true
+  # force_delete = true
   # Task Definition
   requires_compatibilities = ["EC2"]
   capacity_provider_strategy = {
@@ -91,9 +104,12 @@ module "ecs_service" {
           protocol      = "tcp"
         }
       ]
-      # has to be sometingn to pass .env
-      # secrets = https://registry.terraform.io/modules/terraform-aws-modules/ecs/aws/latest/submodules/container-definition#input_secrets
-      # Example image used requires access to write to root filesystem
+      secrets = [
+        for secret_key in local.secret_keys : {
+          name      = secret_key
+          valueFrom = "${local.secrets_arn}:${secret_key}::"
+        }
+      ]
       readonly_root_filesystem    = false
       enable_cloudwatch_logging   = false
       create_cloudwatch_log_group = false
@@ -126,6 +142,95 @@ module "ecs_service" {
 data "aws_ssm_parameter" "ecs_optimized_ami" {
   name = "/aws/service/ecs/optimized-ami/amazon-linux-2/recommended"
 }
+
+module "autoscaling" {
+  source  = "terraform-aws-modules/autoscaling/aws"
+  version = "~> 6.5"
+  for_each = {
+    # On-demand instances
+    ec_2 = {
+      instance_type              = "t2.micro"
+      use_mixed_instances_policy = false
+      mixed_instances_policy     = {}
+      user_data                  = <<-EOT
+        #!/bin/bash
+        cat <<'EOF' >> /etc/ecs/ecs.config
+        ECS_CLUSTER=${local.name}
+        ECS_LOGLEVEL=debug
+        ECS_CONTAINER_INSTANCE_TAGS=${jsonencode(local.tags)}
+        ECS_ENABLE_TASK_IAM_ROLE=true
+        EOF
+      EOT
+    }
+  }
+  create_launch_template = true
+  network_interfaces = [
+    {
+      associate_public_ip_address = true
+    }
+  ]
+  name                            = "${local.name}-${each.key}"
+  image_id                        = jsondecode(data.aws_ssm_parameter.ecs_optimized_ami.value)["image_id"]
+  instance_type                   = each.value.instance_type
+  security_groups                 = [module.autoscaling_sg.security_group_id]
+  user_data                       = base64encode(each.value.user_data)
+  ignore_desired_capacity_changes = true
+  create_iam_instance_profile     = true
+  iam_role_name                   = local.name
+  iam_role_description            = "ECS role for ${local.name}"
+  iam_role_policies = {
+    AmazonEC2ContainerServiceforEC2Role      = "arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role"
+    AmazonSSMManagedInstanceCore             = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+    AmazonSSMManagedEC2InstanceDefaultPolicy = "arn:aws:iam::aws:policy/AmazonSSMManagedEC2InstanceDefaultPolicy"
+    AmazonECSTaskExecutionRolePolicy         = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+    SecretsManagerReadWrite                  = "arn:aws:iam::aws:policy/SecretsManagerReadWrite"
+  }
+  vpc_zone_identifier = module.vpc.public_subnets
+  health_check_type   = "EC2"
+  min_size            = 1
+  max_size            = 1
+  desired_capacity    = 1
+  # https://github.com/hashicorp/terraform-provider-aws/issues/12582
+  autoscaling_group_tags = {
+    AmazonECSManaged = true
+  }
+  # Required for  managed_termination_protection = "DISABLED"
+  protect_from_scale_in = false
+  enable_monitoring     = false
+  tags                  = local.tags
+
+}
+
+module "autoscaling_sg" {
+  source      = "terraform-aws-modules/security-group/aws"
+  version     = "~> 5.0"
+  name        = local.name
+  description = "Autoscaling group security group"
+  vpc_id      = module.vpc.vpc_id
+  # computed_ingress_with_source_security_group_id = [
+  #   {
+  #     rule                     = "http-80-tcp"
+  #     source_security_group_id = module.alb.security_group_id
+  #   }
+  # ]
+  # number_of_computed_ingress_with_source_security_group_id = 1
+  ingress_rules       = ["http-80-tcp"]
+  ingress_cidr_blocks = ["0.0.0.0/0"]
+  egress_rules        = ["all-all"]
+  tags                = local.tags
+}
+
+module "vpc" {
+  source          = "terraform-aws-modules/vpc/aws"
+  version         = "~> 5.0"
+  name            = local.name
+  cidr            = local.vpc_cidr
+  azs             = local.azs
+  private_subnets = [for k, v in local.azs : cidrsubnet(local.vpc_cidr, 4, k)]
+  public_subnets  = [for k, v in local.azs : cidrsubnet(local.vpc_cidr, 8, k + 48)]
+  tags            = local.tags
+}
+
 
 # module "alb" {
 #   source                     = "terraform-aws-modules/alb/aws"
@@ -186,91 +291,3 @@ data "aws_ssm_parameter" "ecs_optimized_ami" {
 #   }
 #   tags = local.tags
 # }
-
-module "autoscaling" {
-  source  = "terraform-aws-modules/autoscaling/aws"
-  version = "~> 6.5"
-  for_each = {
-    # On-demand instances
-    ec_2 = {
-      instance_type              = "t2.micro"
-      use_mixed_instances_policy = false
-      mixed_instances_policy     = {}
-      user_data                  = <<-EOT
-        #!/bin/bash
-        cat <<'EOF' >> /etc/ecs/ecs.config
-        ECS_CLUSTER=${local.name}
-        ECS_LOGLEVEL=debug
-        ECS_CONTAINER_INSTANCE_TAGS=${jsonencode(local.tags)}
-        ECS_ENABLE_TASK_IAM_ROLE=true
-        EOF
-      EOT
-    }
-  }
-  create_launch_template = true
-  network_interfaces = [
-    {
-      associate_public_ip_address = true
-    }
-  ]
-  name                            = "${local.name}-${each.key}"
-  image_id                        = jsondecode(data.aws_ssm_parameter.ecs_optimized_ami.value)["image_id"]
-  instance_type                   = each.value.instance_type
-  security_groups                 = [module.autoscaling_sg.security_group_id]
-  user_data                       = base64encode(each.value.user_data)
-  ignore_desired_capacity_changes = true
-  create_iam_instance_profile     = true
-  iam_role_name                   = local.name
-  iam_role_description            = "ECS role for ${local.name}"
-  iam_role_policies = {
-    AmazonEC2ContainerServiceforEC2Role      = "arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role"
-    AmazonSSMManagedInstanceCore             = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
-    AmazonSSMManagedEC2InstanceDefaultPolicy = "arn:aws:iam::aws:policy/AmazonSSMManagedEC2InstanceDefaultPolicy"
-    AmazonECSTaskExecutionRolePolicy         = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
-  }
-  vpc_zone_identifier = module.vpc.public_subnets
-  health_check_type   = "EC2"
-  min_size            = 1
-  max_size            = 1
-  desired_capacity    = 1
-  # https://github.com/hashicorp/terraform-provider-aws/issues/12582
-  autoscaling_group_tags = {
-    AmazonECSManaged = true
-  }
-  # Required for  managed_termination_protection = "DISABLED"
-  protect_from_scale_in = false
-  enable_monitoring     = false
-  tags                  = local.tags
-
-}
-
-module "autoscaling_sg" {
-  source      = "terraform-aws-modules/security-group/aws"
-  version     = "~> 5.0"
-  name        = local.name
-  description = "Autoscaling group security group"
-  vpc_id      = module.vpc.vpc_id
-  # computed_ingress_with_source_security_group_id = [
-  #   {
-  #     rule                     = "http-80-tcp"
-  #     source_security_group_id = module.alb.security_group_id
-  #   }
-  # ]
-  # number_of_computed_ingress_with_source_security_group_id = 1
-  ingress_rules       = ["http-80-tcp"]
-  ingress_cidr_blocks = ["0.0.0.0/0"]
-  egress_rules        = ["all-all"]
-  tags                = local.tags
-}
-
-module "vpc" {
-  source          = "terraform-aws-modules/vpc/aws"
-  version         = "~> 5.0"
-  name            = local.name
-  cidr            = local.vpc_cidr
-  azs             = local.azs
-  private_subnets = [for k, v in local.azs : cidrsubnet(local.vpc_cidr, 4, k)]
-  public_subnets  = [for k, v in local.azs : cidrsubnet(local.vpc_cidr, 8, k + 48)]
-  tags            = local.tags
-}
-

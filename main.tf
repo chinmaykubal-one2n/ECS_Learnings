@@ -20,7 +20,7 @@ locals {
   azs            = slice(data.aws_availability_zones.available.names, 0, 3)
   container_name = "application-container"
   container_port = 4001
-  host_port = 80
+  host_port      = 80
   tags = {
     Name = local.name
   }
@@ -112,10 +112,10 @@ module "ecs_service" {
         }
       ]
       readonly_root_filesystem = false
-      
+
       # default values are true so comment to enable
-      enable_cloudwatch_logging   = false
-      create_cloudwatch_log_group = false
+      enable_cloudwatch_logging              = false
+      create_cloudwatch_log_group            = false
       cloudwatch_log_group_name              = "/aws/ecs/${local.name}/${local.container_name}"
       cloudwatch_log_group_retention_in_days = 7
     }

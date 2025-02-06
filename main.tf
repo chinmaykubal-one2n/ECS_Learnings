@@ -19,12 +19,13 @@ locals {
   vpc_cidr       = "10.0.0.0/16"
   azs            = slice(data.aws_availability_zones.available.names, 0, 3)
   container_name = "application-container"
-  container_port = 80
+  container_port = 4001
+  host_port = 80
   tags = {
     Name = local.name
   }
   # copy the secrets manager ARN very carefully, take the reference from the below
-  secrets_arn = "arn:aws:secretsmanager:us-east-1:846583868645:secret:demo-secrets-manager20250205120059899300000001"
+  secrets_arn = "arn:aws:secretsmanager:us-east-1:779583862623:secret:demo-secrets-manager20250206103033986600000001"
   # List of all secret names
   secret_keys = [
     "AZURE_STORAGE_ACCOUNT_ACCESS_KEY_Godspeed", "AZURE_STORAGE_ACCOUNT_ACCESS_KEY_Mindmatrix", "AZURE_STORAGE_ACCOUNT_ACCESS_KEY_Rooman",
@@ -95,12 +96,12 @@ module "ecs_service" {
   # Container definition(s)
   container_definitions = {
     (local.container_name) = {
-      image = "nginx:latest"
+      image = "779583862623.dkr.ecr.us-east-1.amazonaws.com/demo-ecr:latest"
       port_mappings = [
         {
           name          = local.container_name
           containerPort = local.container_port
-          hostPort      = local.container_port
+          hostPort      = local.host_port
           protocol      = "tcp"
         }
       ]
@@ -110,9 +111,13 @@ module "ecs_service" {
           valueFrom = "${local.secrets_arn}:${secret_key}::"
         }
       ]
-      readonly_root_filesystem    = false
+      readonly_root_filesystem = false
+      
+      # default values are true so comment to enable
       enable_cloudwatch_logging   = false
       create_cloudwatch_log_group = false
+      cloudwatch_log_group_name              = "/aws/ecs/${local.name}/${local.container_name}"
+      cloudwatch_log_group_retention_in_days = 7
     }
   }
 

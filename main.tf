@@ -19,7 +19,8 @@ locals {
   vpc_cidr       = "10.0.0.0/16"
   azs            = slice(data.aws_availability_zones.available.names, 0, 3)
   container_name = "application-container"
-  container_port = 4001
+  # container_port = 4001
+  container_port = 80
   host_port      = 80
   tags = {
     Name = local.name
@@ -40,8 +41,9 @@ locals {
 }
 
 module "ecs_cluster" {
-  source                                = "terraform-aws-modules/ecs/aws//modules/cluster"
-  cluster_name                          = local.name
+  source       = "terraform-aws-modules/ecs/aws//modules/cluster"
+  cluster_name = local.name
+  # depends_on                            = [module.autoscaling]
   create_cloudwatch_log_group           = false
   default_capacity_provider_use_fargate = false
   create_task_exec_iam_role             = true
@@ -70,8 +72,9 @@ module "ecs_cluster" {
 }
 
 module "ecs_service" {
-  source  = "terraform-aws-modules/ecs/aws//modules/service"
-  version = "5.12.0"
+  source     = "terraform-aws-modules/ecs/aws//modules/service"
+  version    = "5.12.0"
+  # depends_on = [module.ecs_cluster, module.alb, module.vpc, module.autoscaling]
   # Service
   name         = "${local.name}-service"
   cluster_arn  = module.ecs_cluster.arn
@@ -96,7 +99,8 @@ module "ecs_service" {
   # Container definition(s)
   container_definitions = {
     (local.container_name) = {
-      image = "779583862623.dkr.ecr.us-east-1.amazonaws.com/demo-ecr:latest"
+      # image = "779583862623.dkr.ecr.us-east-1.amazonaws.com/demo-ecr:latest"
+      image = "nginx:latest"
       port_mappings = [
         {
           name          = local.container_name
@@ -105,12 +109,12 @@ module "ecs_service" {
           protocol      = "tcp"
         }
       ]
-      secrets = [
-        for secret_key in local.secret_keys : {
-          name      = secret_key
-          valueFrom = "${local.secrets_arn}:${secret_key}::"
-        }
-      ]
+      # secrets = [
+      #   for secret_key in local.secret_keys : {
+      #     name      = secret_key
+      #     valueFrom = "${local.secrets_arn}:${secret_key}::"
+      #   }
+      # ]
       readonly_root_filesystem = false
 
       # default values are true so comment to enable
@@ -121,26 +125,26 @@ module "ecs_service" {
     }
   }
 
-  # load_balancer = {
-  #   service = {
-  #     target_group_arn = module.alb.target_groups["dev_ecs"].arn
-  #     container_name   = local.container_name
-  #     container_port   = local.container_port
-  #   }
-  # }
+  load_balancer = {
+    service = {
+      target_group_arn = module.alb.target_groups["dev_ecs"].arn
+      container_name   = local.container_name
+      container_port   = local.container_port
+    }
+  }
 
-  subnet_ids         = module.vpc.private_subnets
-  security_group_ids = [module.autoscaling_sg.security_group_id]
-  # security_group_rules = {
-  #   # alb_http_ingress = {
-  #   #   type                     = "ingress"
-  #   #   from_port                = local.container_port
-  #   #   to_port                  = local.container_port
-  #   #   protocol                 = "tcp"
-  #   #   description              = "Service port"
-  #   #   source_security_group_id = module.alb.security_group_id
-  #   # }
-  # }
+  subnet_ids = module.vpc.private_subnets
+  # security_group_ids = [module.autoscaling_sg.security_group_id]
+  security_group_rules = {
+    alb_http_ingress = {
+      type                     = "ingress"
+      from_port                = local.container_port
+      to_port                  = local.container_port
+      protocol                 = "tcp"
+      description              = "Service port"
+      source_security_group_id = module.alb.security_group_id
+    }
+  }
   tags = local.tags
 }
 
@@ -149,8 +153,9 @@ data "aws_ssm_parameter" "ecs_optimized_ami" {
 }
 
 module "autoscaling" {
-  source  = "terraform-aws-modules/autoscaling/aws"
-  version = "~> 6.5"
+  source     = "terraform-aws-modules/autoscaling/aws"
+  version    = "~> 6.5"
+  # depends_on = [module.vpc, module.autoscaling_sg]
   for_each = {
     # On-demand instances
     ec_2 = {
@@ -183,6 +188,7 @@ module "autoscaling" {
   create_iam_instance_profile     = true
   iam_role_name                   = local.name
   iam_role_description            = "ECS role for ${local.name}"
+  # force_delete                    = true
   iam_role_policies = {
     AmazonEC2ContainerServiceforEC2Role      = "arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role"
     AmazonSSMManagedInstanceCore             = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
@@ -212,17 +218,18 @@ module "autoscaling_sg" {
   name        = local.name
   description = "Autoscaling group security group"
   vpc_id      = module.vpc.vpc_id
-  # computed_ingress_with_source_security_group_id = [
-  #   {
-  #     rule                     = "http-80-tcp"
-  #     source_security_group_id = module.alb.security_group_id
-  #   }
-  # ]
-  # number_of_computed_ingress_with_source_security_group_id = 1
-  ingress_rules       = ["http-80-tcp"]
-  ingress_cidr_blocks = ["0.0.0.0/0"]
-  egress_rules        = ["all-all"]
-  tags                = local.tags
+  # depends_on  = [module.vpc, module.alb]
+  computed_ingress_with_source_security_group_id = [
+    {
+      rule                     = "http-80-tcp"
+      source_security_group_id = module.alb.security_group_id
+    }
+  ]
+  number_of_computed_ingress_with_source_security_group_id = 1
+  # ingress_rules                                            = ["http-80-tcp"]
+  # ingress_cidr_blocks                                      = ["0.0.0.0/0"]
+  egress_rules = ["all-all"]
+  tags         = local.tags
 }
 
 module "vpc" {
@@ -237,62 +244,75 @@ module "vpc" {
 }
 
 
-# module "alb" {
-#   source                     = "terraform-aws-modules/alb/aws"
-#   version                    = "~> 9.0"
-#   name                       = "${local.name}-alb"
-#   load_balancer_type         = "application"
-#   vpc_id                     = module.vpc.vpc_id
-#   subnets                    = module.vpc.public_subnets
-#   enable_deletion_protection = false
-#   # Security Group
-#   security_group_ingress_rules = {
-#     all_http = {
-#       from_port   = 80
-#       to_port     = 80
-#       ip_protocol = "tcp"
-#       cidr_ipv4   = "0.0.0.0/0"
-#     }
-#   }
-#   security_group_egress_rules = {
-#     all = {
-#       ip_protocol = "-1"
-#       cidr_ipv4   = module.vpc.vpc_cidr_block
-#     }
-#   }
-#   listeners = {
-#     ex_http = {
-#       port     = 80
-#       protocol = "HTTP"
+module "alb" {
+  source                     = "terraform-aws-modules/alb/aws"
+  version                    = "~> 9.0"
+  name                       = "${local.name}-alb"
+  load_balancer_type         = "application"
+  vpc_id                     = module.vpc.vpc_id
+  subnets                    = module.vpc.public_subnets
+  # depends_on                 = [module.vpc]
+  enable_deletion_protection = false
+  # Security Group
+  security_group_ingress_rules = {
+    all_http = {
+      from_port   = 80
+      to_port     = 80
+      ip_protocol = "tcp"
+      cidr_ipv4   = "0.0.0.0/0"
+    }
+  }
+  security_group_egress_rules = {
+    all = {
+      # -1 means all protocols (TCP, UDP, ICMP, etc.) are allowed.
+      ip_protocol = "-1"
+      cidr_ipv4   = module.vpc.vpc_cidr_block
+    }
+  }
+  listeners = {
+    ex_http = {
+      port     = 80
+      protocol = "HTTP"
 
-#       forward = {
-#         target_group_key = "dev_ecs"
-#       }
-#     }
-#   }
-#   target_groups = {
-#     dev_ecs = {
-#       backend_protocol                  = "HTTP"
-#       backend_port                      = local.container_port
-#       target_type                       = "instance"
-#       deregistration_delay              = 5
-#       load_balancing_cross_zone_enabled = true
-#       health_check = {
-#         enabled             = true
-#         healthy_threshold   = 5
-#         interval            = 30
-#         matcher             = "200"
-#         path                = "/"
-#         port                = "traffic-port"
-#         protocol            = "HTTP"
-#         timeout             = 5
-#         unhealthy_threshold = 2
-#       }
+      forward = {
+        target_group_key = "dev_ecs"
+      }
+    }
+  }
+  target_groups = {
+    dev_ecs = {
+      backend_protocol                  = "HTTP"
+      backend_port                      = local.container_port
+      target_type                       = "instance"
+      deregistration_delay              = 5
+      load_balancing_cross_zone_enabled = true
+      health_check = {
+        enabled             = true
+        healthy_threshold   = 5
+        interval            = 30
+        matcher             = "200"
+        path                = "/"
+        port                = "traffic-port"
+        protocol            = "HTTP"
+        timeout             = 5
+        unhealthy_threshold = 2
+      }
+      create_attachment = false
+    }
+  }
+  tags = local.tags
+}
 
-#       # Theres nothing to attach here in this definition. Instead,
-#       # ECS will attach the IPs of the tasks to this target group
-#       create_attachment = false
-#     }
-#   }
-#   tags = local.tags
-# }
+
+
+# Error: deleting EC2 Internet Gateway (igw-0ba6c6fe9e19bda8b): 
+# detaching EC2 Internet Gateway (igw-0ba6c6fe9e19bda8b) from VPC (vpc-02fd8431ba2630154):
+#  operation error EC2: DetachInternetGateway, https response error StatusCode: 400,
+#   RequestID: f71ac991-c81a-4bf8-9c3b-1a42f0b7355e, api error DependencyViolation: 
+#   Network vpc-02fd8431ba2630154 has some mapped public address(es). Please unmap those public address(es) before detaching the gateway.
+
+# Error: waiting for ECS Service (arn:aws:ecs:us-east-1:779583862623:service/Dev/Dev-service)
+#  delete: timeout while waiting for state to become 'INACTIVE' (last state: 'DRAINING', timeout: 20m0s)
+
+# https://discuss.hashicorp.com/t/ecs-srevice-destroy-stuck-issue/58366
+# https://stackoverflow.com/questions/68117174/during-terraform-destroy-terraform-is-trying-to-destroy-the-ecs-cluster-before

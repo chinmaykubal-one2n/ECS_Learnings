@@ -6,3 +6,5 @@ terraform.tfstate.backup
 .env
 .env.*
 newcode.tf
+.terraform.tfstate.lock.info
+graph.png

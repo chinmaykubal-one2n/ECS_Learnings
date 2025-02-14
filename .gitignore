@@ -8,3 +8,5 @@ terraform.tfstate.backup
 newcode.tf
 .terraform.tfstate.lock.info
 graph.png
+terraform.tfvars
+main.old

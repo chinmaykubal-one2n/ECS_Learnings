@@ -1,24 +1,9 @@
-provider "aws" {
-  region = local.region
-}
-
-locals {
-  region     = "us-east-1"
-  name       = "demo-ecr"
-  sm_name    = "demo-secrets-manager"
-  tag_name   = "demo-setup"
-  account_id = data.aws_caller_identity.current.account_id
-  tags = {
-    Name = local.tag_name
-  }
-}
-
 data "aws_caller_identity" "current" {}
 
 module "ecr" {
   source                            = "terraform-aws-modules/ecr/aws"
   version                           = "2.3.1"
-  repository_name                   = local.name
+  repository_name                   = var.name
   repository_type                   = "private"
   repository_image_tag_mutability   = "IMMUTABLE"
   repository_image_scan_on_push     = true
@@ -42,13 +27,13 @@ module "ecr" {
     ]
   })
   repository_force_delete = true
-  tags                    = local.tags
+  tags                    = var.tags
 }
 
 module "secrets_manager" {
   source                  = "terraform-aws-modules/secrets-manager/aws"
   version                 = "1.3.1"
-  name_prefix             = local.sm_name
+  name_prefix             = var.sm_name
   description             = "Demo Secrets Manager"
   recovery_window_in_days = 0
   create_policy           = true
@@ -69,5 +54,5 @@ module "secrets_manager" {
     secret_value = ""
   })
 
-  tags = local.tags
+  tags = var.tags
 }

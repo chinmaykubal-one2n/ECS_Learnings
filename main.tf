@@ -10,6 +10,7 @@ locals {
 
 module "ecs_cluster" {
   source                                = "terraform-aws-modules/ecs/aws//modules/cluster"
+  version                               = "5.12.0"
   cluster_name                          = "${var.name}-cluster"
   create_cloudwatch_log_group           = false
   default_capacity_provider_use_fargate = false
@@ -101,7 +102,7 @@ module "ecs_service" {
 
 module "autoscaling" {
   source  = "terraform-aws-modules/autoscaling/aws"
-  version = "~> 6.5"
+  version = "8.0.1"
   for_each = {
     # On-demand instances
     ec_2 = {
@@ -156,7 +157,7 @@ module "autoscaling" {
 
 module "autoscaling_sg" {
   source      = "terraform-aws-modules/security-group/aws"
-  version     = "~> 5.0"
+  version     = "5.3.0"
   name        = "${var.name}-asg-sg"
   description = "Autoscaling group security group"
   vpc_id      = module.vpc.vpc_id
@@ -173,7 +174,7 @@ module "autoscaling_sg" {
 
 module "vpc" {
   source          = "terraform-aws-modules/vpc/aws"
-  version         = "~> 5.0"
+  version         = "5.19.0"
   name            = "${var.name}-vpc"
   cidr            = var.vpc_cidr
   azs             = local.azs
@@ -184,7 +185,7 @@ module "vpc" {
 
 module "alb" {
   source                     = "terraform-aws-modules/alb/aws"
-  version                    = "~> 9.0"
+  version                    = "9.13.0"
   name                       = "${var.name}-alb"
   load_balancer_type         = "application"
   vpc_id                     = module.vpc.vpc_id

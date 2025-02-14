@@ -1,5 +1,9 @@
 data "aws_availability_zones" "available" {}
 
+data "aws_ssm_parameter" "ecs_optimized_ami" {
+  name = "/aws/service/ecs/optimized-ami/amazon-linux-2/recommended"
+}
+
 locals {
   azs = slice(data.aws_availability_zones.available.names, 0, 3)
 }
@@ -29,6 +33,7 @@ module "ecs_cluster" {
   }
   tags = var.tags
 }
+
 module "ecs_service" {
   source                   = "terraform-aws-modules/ecs/aws//modules/service"
   version                  = "5.12.0"
@@ -92,10 +97,6 @@ module "ecs_service" {
     }
   }
   tags = var.tags
-}
-
-data "aws_ssm_parameter" "ecs_optimized_ami" {
-  name = "/aws/service/ecs/optimized-ami/amazon-linux-2/recommended"
 }
 
 module "autoscaling" {

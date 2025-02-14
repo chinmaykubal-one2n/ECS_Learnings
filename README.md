@@ -57,4 +57,4 @@ While doing terraform destroy it will keep waitng for service state to be in INA
 ```
 Error: waiting for ECS Service delete: timeout while waiting for state to become 'INACTIVE' (last state: 'DRAINING', timeout: 20m0s)
 ```
-To counter this error we manully need to manully click on the Delete cluster button on AWS portal once the last status of the task will go in the stopping state, then terraform destroy will work as usual.
+To counter this error we manully need to click on the delete cluster button on the AWS portal after the last status of the task will go in the stopping state, then terraform destroy will work as usual.
